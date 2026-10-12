@@ -25,6 +25,31 @@ from utils.videos import save_data
 
 console = Console()
 
+# Video encoder configuration.
+#
+# Upstream hardcoded NVIDIA's ``h264_nvenc`` hardware encoder in all three
+# ffmpeg output calls, with no fallback and no config option. That aborts with
+# ``Unknown encoder 'h264_nvenc'`` on every machine without an NVIDIA GPU
+# (Intel/AMD/Apple Silicon, or Linux without the proprietary drivers) -- and it
+# aborted at the very last step, after minutes of TTS + scraping work.
+#
+# Default to software x264 so CPU-only users work out of the box. Set
+# ``RVM_VIDEO_ENCODER=h264_nvenc`` to go back to GPU encoding.
+VIDEO_ENCODER: Final = os.getenv("RVM_VIDEO_ENCODER", "libx264")
+
+
+def video_encoder_args() -> Dict[str, str | int]:
+    """Return the ffmpeg kwargs that select and rate-control the video encoder."""
+    if VIDEO_ENCODER.endswith("nvenc"):
+        # NVENC is bitrate-driven; it ignores CRF/preset style tuning.
+        return {"c:v": VIDEO_ENCODER, "b:v": "20M"}
+    # x264: quality-based CRF, with a speed/size trade-off you can tune.
+    return {
+        "c:v": VIDEO_ENCODER,
+        "preset": os.getenv("RVM_X264_PRESET", "veryfast"),
+        "crf": int(os.getenv("RVM_X264_CRF", "23")),
+    }
+
 
 class ProgressFfmpeg(threading.Thread):
     def __init__(self, vid_duration_seconds, progress_update_callback):
@@ -93,8 +118,7 @@ def prepare_background(reddit_id: str, W: int, H: int) -> str:
             output_path,
             an=None,
             **{
-                "c:v": "h264_nvenc",
-                "b:v": "20M",
+                **video_encoder_args(),
                 "b:a": "192k",
                 "threads": multiprocessing.cpu_count(),
             },
@@ -438,8 +462,7 @@ def make_final_video(
                 path,
                 f="mp4",
                 **{
-                    "c:v": "h264_nvenc",
-                    "b:v": "20M",
+                    **video_encoder_args(),
                     "b:a": "192k",
                     "threads": multiprocessing.cpu_count(),
                 },
@@ -468,8 +491,7 @@ def make_final_video(
                     path,
                     f="mp4",
                     **{
-                        "c:v": "h264_nvenc",
-                        "b:v": "20M",
+                        **video_encoder_args(),
                         "b:a": "192k",
                         "threads": multiprocessing.cpu_count(),
                     },
